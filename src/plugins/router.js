@@ -6,6 +6,7 @@ import explore from '../views/explorePage.vue';
 import cultivate from '../views/cultivatePage.vue';
 import endlesstower from '../views/endlessPage.vue'
 import game from '../views/game/game.vue'
+import idle from '../views/idle/IdleGame.vue'
 import { createRouter, createWebHashHistory } from 'vue-router';
 
 const routes = [
@@ -16,6 +17,14 @@ const routes = [
             keepAlive: false
         },
         component: index
+    },
+    {
+        path: '/idle',
+        name: 'idle',
+        meta: {
+            keepAlive: false
+        },
+        component: idle
     },
     {
         path: '/home',

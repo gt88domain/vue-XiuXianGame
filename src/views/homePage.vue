@@ -950,7 +950,8 @@
                     },
                     { text: '挑战无尽塔', handler: () => this.$router.push('/endlesstower') },
                     { text: '世界BOSS', handler: () => this.$router.push('/boss') },
-                    { text: '休闲娱乐', handler: () => this.$router.push('/game') }
+                    { text: '休闲娱乐', handler: () => this.$router.push('/game') },
+                    { text: '挂机修仙·融合版', type: 'danger', handler: () => this.$router.push('/idle') }
                 ];
                 // 初始化玩家当前气血
                 this.player.health = this.player.maxHealth;
