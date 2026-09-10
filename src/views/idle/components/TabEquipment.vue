@@ -170,13 +170,4 @@
     .bag-ops .el-button { padding: 0 4px; height: 20px; font-size: 11px; }
 
     .stat-line { font-size: 13px; margin: 3px 0; }
-
-    /* 品质配色(XiuXianGame 7阶) */
-    .q-info { color: #909399; }
-    .q-success { color: #67c23a; }
-    .q-primary { color: #409eff; }
-    .q-purple { color: #8560f5; }
-    .q-warning { color: #e6a23c; }
-    .q-danger { color: #f56c6c; }
-    .q-pink { color: #f472b6; }
 </style>

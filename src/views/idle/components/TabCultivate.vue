@@ -20,7 +20,7 @@
             <el-button :type="store.player.settings.autoCultivate ? 'warning' : 'info'" @click="store.player.settings.autoCultivate = !store.player.settings.autoCultivate">
                 自动修炼 {{ store.player.settings.autoCultivate ? '开' : '关' }}
             </el-button>
-            <el-button type="danger" :disabled="!store.canBreakthrough" @click="store.breakthrough()">
+            <el-button class="btn-breakthrough" type="danger" :disabled="!store.canBreakthrough" @click="store.breakthrough()">
                 {{ store.isMaxLevel ? '已至圆满' : '突破境界' }}
             </el-button>
         </div>

@@ -1,5 +1,5 @@
 <template>
-    <div class="game-container-wrapper" draggable="true">
+    <div class="game-container-wrapper" :class="{ 'idle-stage': $route.name === 'idle' }" draggable="true">
         <div :class="['game-container', { dark: player.dark }]">
             <router-view v-slot="{ Component }">
                 <keep-alive v-if="$route.meta.keepAlive">

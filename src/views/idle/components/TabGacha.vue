@@ -89,12 +89,4 @@
     .res-item { font-size: 12px; border: 1px solid var(--el-border-color-lighter); border-radius: 4px; padding: 3px 8px; }
 
     .res-rarity { color: var(--el-text-color-secondary); margin-left: 2px; }
-
-    .q-info { color: #909399; }
-    .q-success { color: #67c23a; }
-    .q-primary { color: #409eff; }
-    .q-purple { color: #8560f5; }
-    .q-warning { color: #e6a23c; }
-    .q-danger { color: #f56c6c; }
-    .q-pink { color: #f472b6; }
 </style>
