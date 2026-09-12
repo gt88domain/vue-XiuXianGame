@@ -1,0 +1,43 @@
+name: Idle game quality
+
+on:
+  push:
+    branches: [feat/idle-complete-multilingual]
+  pull_request:
+    branches: [arena/01a08b76-vue-xiuxiangame]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: idle-quality-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Record exact source
+        run: |
+          mkdir -p /tmp/idle-evidence
+          git rev-parse HEAD > /tmp/idle-evidence/HEAD.txt
+          git archive --format=tar.gz HEAD > /tmp/idle-evidence/source.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: idle-source-${{ github.event.pull_request.head.sha || github.sha }}
+          path: /tmp/idle-evidence/
+          retention-days: 7
+      - run: npm ci --no-audit --no-fund
+      - name: Game regression tests
+        run: npm run test:idle --if-present
+      - name: Production build (no deployment)
+        run: npm run build
