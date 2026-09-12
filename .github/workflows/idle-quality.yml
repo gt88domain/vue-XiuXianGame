@@ -37,7 +37,21 @@ jobs:
           path: /tmp/idle-evidence/
           retention-days: 7
       - run: npm ci --no-audit --no-fund
+      - name: Snapshot locked validation dependencies
+        if: github.run_number == 2
+        run: tar -czf /tmp/idle-dependencies.tar.gz node_modules
+      - uses: actions/upload-artifact@v4
+        if: github.run_number == 2
+        with:
+          name: idle-validation-dependencies
+          path: /tmp/idle-dependencies.tar.gz
+          retention-days: 1
       - name: Game regression tests
         run: npm run test:idle --if-present
       - name: Production build (no deployment)
         run: npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: idle-build-${{ github.event.pull_request.head.sha || github.sha }}
+          path: dist/
+          retention-days: 7
