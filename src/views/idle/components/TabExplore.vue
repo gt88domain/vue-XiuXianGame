@@ -1,5 +1,10 @@
 <template>
     <div class="explore">
+        <section v-if="store.battle" class="battle-summary" aria-label="最近战斗结果">
+            <div class="battle-result" :class="{defeat:!store.battle.win}"><span class="battle-seal" aria-hidden="true">{{ store.battle.win ? '胜' : '退' }}</span><div><span class="battle-eyebrow">最近一战 · {{ store.battle.rounds }} 回合</span><h3>{{ store.battle.win ? '战胜' : '暂别' }} {{ store.battle.monster.name }}</h3><p>对手境界 Lv.{{ store.battle.monster.level }} · {{ store.battle.win ? '修行有所收获，详细奖励见日志。' : '整理装备、分配属性后，再来挑战。' }}</p></div></div>
+            <div class="battle-health"><span>本场剩余气血</span><div class="battle-health-track"><div :style="{width:battleHealthPct + '%'}" /></div><b>{{ fmt(store.battle.playerHealth) }} / {{ fmt(store.battle.playerMaxHealth) }}</b></div>
+            <el-button text @click="openPanels = openPanels.includes('battle') ? [] : ['battle']">{{ openPanels.includes('battle') ? '收起战斗过程' : '查看战斗过程' }}</el-button>
+        </section>
         <!-- 战斗回放 -->
         <el-collapse v-model="openPanels" class="battle-collapse">
             <el-collapse-item name="battle">
@@ -21,16 +26,18 @@
         <!-- 探索开关 -->
         <div class="explore-head">
             <el-button :type="store.player.settings.autoExplore ? 'warning' : 'info'" size="small"
-                @click="store.player.settings.autoExplore = !store.player.settings.autoExplore">
+                @click="store.player.settings.autoExplore = !store.player.settings.autoExplore; store.autoExploreMessage = ''">
                 自动探索 {{ store.player.settings.autoExplore ? '开' : '关' }}
             </el-button>
             <span class="cd" v-if="store.exploreCd > 0">冷却 {{ store.exploreCd.toFixed(1) }}s</span>
             <span class="tip">探索消耗灵力，可获得灵石/灵草/残页/装备，还有奇遇与战斗</span>
         </div>
 
+        <p v-if="store.autoExploreMessage" class="automation-message" role="status">{{ store.autoExploreMessage }}</p>
+
         <!-- 地点列表 -->
         <div class="loc-list">
-            <div v-for="loc in locations" :key="loc.id" class="loc-card"
+            <button type="button" v-for="loc in locations" :key="loc.id" class="loc-card" :disabled="store.player.level < loc.minLevel" :aria-pressed="store.player.settings.exploreLocation === loc.id"
                 :class="{ locked: store.player.level < loc.minLevel, active: store.player.settings.exploreLocation === loc.id }"
                 @click="choose(loc)">
                 <div class="loc-name">
@@ -40,7 +47,7 @@
                 </div>
                 <div class="loc-desc">{{ loc.description }}</div>
                 <div class="loc-cost">灵力消耗: {{ fmt(loc.spiritCost) }}</div>
-            </div>
+            </button>
         </div>
 
         <div class="explore-btn">
@@ -72,16 +79,21 @@
 
     const store = useIdleStore();
     const openPanels = ref([]);
+    const battleHealthPct = computed(() => store.battle?.playerMaxHealth ? Math.max(0, Math.min(100, store.battle.playerHealth / store.battle.playerMaxHealth * 100)) : 0);
 
     const currentLocName = computed(() => locations.find(l => l.id === store.player.settings.exploreLocation)?.name || '');
 
     const choose = loc => {
         if (store.player.level < loc.minLevel) return;
         store.player.settings.exploreLocation = loc.id;
+        store.autoExploreMessage = '';
     };
 </script>
 
 <style scoped>
+    .battle-summary{padding:16px;margin-bottom:12px;border:1px solid #b5964350;border-radius:8px;background:linear-gradient(120deg,#b5964318,transparent)}
+    .battle-result{display:flex;gap:14px;align-items:center}.battle-seal{flex-shrink:0;display:grid;place-items:center;width:48px;height:48px;border:1px solid #b9c991;border-radius:50%;font:26px serif;color:#b9c991}.defeat .battle-seal{color:#e9af96;border-color:#e9af96}.battle-eyebrow{font-size:11px;letter-spacing:2px;color:#b0ab9b}.battle-result h3{font-size:18px;font-weight:500;margin:5px 0;color:#e9d5a2}.battle-result p{font-size:12px;line-height:1.7;color:#b0ab9b;margin:0}.battle-health{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12px;color:#b0ab9b;margin-top:14px}.battle-health-track{height:6px;flex:1;min-width:50px;background:#0004;border-radius:8px;overflow:hidden}.battle-health-track>div{height:100%;background:#9caf77}.battle-summary>.el-button{margin-top:6px}.loc-card:focus-visible{outline:2px solid #e8ca79;outline-offset:3px}
+    .automation-message { padding:10px 12px; border-left:2px solid #d4af37; background:#b5964314; color:#d4c6a1; font-size:13px; line-height:1.7; }
     .battle-collapse { margin-bottom: 10px; }
 
     .battle-box { max-height: 260px; }
@@ -135,6 +147,7 @@
     }
 
     .loc-card {
+        font:inherit; color:inherit; text-align:left; background:transparent;
         border: 1px solid var(--el-border-color-light);
         border-radius: 6px;
         padding: 10px;

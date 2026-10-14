@@ -4,6 +4,7 @@
 //   vue-XiuXianGame  : 境界点分配/装备分解/世界BOSS/每日签到/称号/灵宠捕捉/自动出售
 
 import { defineStore } from 'pinia';
+import { saveStorage, createBackup, readBackup, readOfflineReport, rememberOfflineReport } from './save-storage';
 import { realms, getRealm, realmName, MAX_LEVEL, maxCultivationOf, economyFactor, combatFactor } from './data/realms';
 import { genEquipment, enhanceCost, enhanceSuccess, enhancedStats, reforge, salvageGain, QUALITIES, QUALITY_ORDER, equipScore, REFORGE_CFG } from './data/equipment';
 import { genMonster } from './data/monsters';
@@ -21,6 +22,31 @@ import { rint, rfloat, pick, chance, uid, fmt, pct, fmtTime } from './utils';
 const nowSec = () => Math.floor(Date.now() / 1000);
 const today = () => new Date().toISOString().slice(0, 10);
 
+// Validate the existing v1 format before replacing a live player.
+function validateSave(value, template, path = 'player', depth = 0) {
+    if (depth > 24) throw new Error('存档嵌套过深');
+    if (value === undefined) throw new Error(`${path} 缺失`);
+    if (typeof value === 'number' && !Number.isFinite(value)) throw new Error(`${path} 数值无效`);
+    if (template !== null && typeof template !== 'object' && typeof value !== typeof template) {
+        throw new Error(`${path} 类型错误`);
+    }
+    if (Array.isArray(template) && !Array.isArray(value)) throw new Error(`${path} 应为列表`);
+    if (template && typeof template === 'object' && !Array.isArray(template) &&
+        (!value || typeof value !== 'object' || Array.isArray(value))) throw new Error(`${path} 应为对象`);
+    if (value && typeof value === 'object') {
+        for (const key of Object.keys(value)) {
+            if (['__proto__', 'constructor', 'prototype'].includes(key)) throw new Error('存档字段无效');
+            validateSave(value[key], template?.[key] ?? null, `${path}.${key}`, depth + 1);
+        }
+        if (template && !Array.isArray(template)) {
+            for (const key of Object.keys(template)) {
+                validateSave(value[key], template[key], `${path}.${key}`, depth + 1);
+            }
+        }
+    }
+}
+
+
 const emptyCounters = () => ({
     breakthroughCount: 0, explorationCount: 0, killCount: 0, bossKills: 0,
     pillsCrafted: 0, pillsConsumed: 0, equipmentFound: 0, pinkFound: 0, enhanceCount: 0,
@@ -28,9 +54,7 @@ const emptyCounters = () => ({
     eventTriggered: 0, unlockedPillRecipes: 0, checkinTotal: 0, level: 1
 });
 
-export const useIdleStore = defineStore('idleXiuxian', {
-    state: () => ({
-        player: {
+const createPlayer = () => ({
             name: '无名修士',
             createdAt: nowSec(),
             lastOnline: Date.now(),
@@ -63,14 +87,20 @@ export const useIdleStore = defineStore('idleXiuxian', {
             boss: null,
             nextBossTime: 0,
             settings: { autoSellQualities: ['info', 'success'], autoExplore: false, autoCultivate: false, exploreLocation: 'newbie_village' }
-        },
+        });
+
+export const useIdleStore = defineStore('idleXiuxian', {
+    state: () => ({
+        player: createPlayer(),
         // 非持久化运行时状态
         logs: [],
         battle: null,
         exploreCd: 0,
         offlineReport: null,
         dungeon: null,
-        gachaResults: null
+        gachaResults: null,
+        autoExploreMessage: '',
+        lastOfflineReport: null
     }),
 
     getters: {
@@ -219,23 +249,26 @@ export const useIdleStore = defineStore('idleXiuxian', {
 
         // ---------- 初始化(离线收益) ----------
         init() {
+            this.lastOfflineReport = readOfflineReport();
             const now = Date.now();
-            const elapsed = Math.min((now - this.player.lastOnline) / 1000, 8 * 3600);
+            const elapsed = Math.max(0, Math.min((now - this.player.lastOnline) / 1000, 8 * 3600));
             this.player.lastOnline = now;
             if (elapsed > 60) {
-                const gain = Math.min(this.spiritRegen * elapsed * 0.6, this.spiritCap);
+                const gain = Math.max(0, Math.min(this.spiritRegen * elapsed * 0.6, this.spiritCap - this.player.spirit));
                 this.player.spirit += gain;
                 this.offlineReport = { elapsed, spirit: gain };
+                this.lastOfflineReport = { elapsed, spirit: gain };
+                rememberOfflineReport(this.lastOfflineReport);
                 this.log(`闭关修炼 ${fmtTime(elapsed)}，恢复灵力 +${fmt(gain)}`, 'success');
             }
             this._lastTick = Date.now();
             this.player.counters.level = Math.max(this.player.counters.level, this.player.level);
         },
 
-        // ---------- 每秒 tick(worker驱动) ----------
+        // ---------- 每秒 tick(按真实时间差结算) ----------
         tick() {
             const now = Date.now();
-            const dt = Math.min((now - (this._lastTick || now)) / 1000, 120);
+            const dt = Math.max(0, Math.min((now - (this._lastTick || now)) / 1000, 120));
             this._lastTick = now;
             // 灵力恢复
             if (this.player.spirit < this.spiritCap) {
@@ -252,14 +285,26 @@ export const useIdleStore = defineStore('idleXiuxian', {
             if (this.player.settings.autoCultivate) this.cultivate('auto');
             // 自动探索
             if (this.player.settings.autoExplore && this.exploreCd <= 0) {
-                this.explore(this.player.settings.exploreLocation, true);
+                const loc = locations.find(l => l.id === this.player.settings.exploreLocation);
+                if (!loc || this.player.level < loc.minLevel) {
+                    this.player.settings.autoExplore = false;
+                    this.autoExploreMessage = '自动探索已停止：当前地点尚未解锁，请选择可探索的地点。';
+                } else if (this.player.inventory.length >= 200) {
+                    this.player.settings.autoExplore = false;
+                    this.autoExploreMessage = '自动探索已停止：背包已满，请先分解不需要的装备。';
+                } else if (this.player.spirit < loc.spiritCost) {
+                    this.autoExploreMessage = `等待灵力恢复，需要 ${fmt(loc.spiritCost)} 灵力后继续探索。`;
+                } else {
+                    this.autoExploreMessage = '';
+                    this.explore(loc.id, true);
+                }
             }
         },
 
         // ---------- 修炼 ----------
         cultivate(mode = 'one') {
             let done = 0, doubled = 0, gained = 0;
-            const limit = mode === 'ten' ? 10 : mode === 'hundred' ? 100 : Infinity;
+            const limit = mode === 'one' ? 1 : mode === 'ten' ? 10 : mode === 'hundred' ? 100 : Infinity;
             while (done < limit) {
                 if (mode !== 'one' && mode !== 'ten' && mode !== 'hundred') {
                     // auto: 到达瓶颈即停
@@ -316,6 +361,7 @@ export const useIdleStore = defineStore('idleXiuxian', {
         explore(locationId, silent = false) {
             const loc = locations.find(l => l.id === locationId);
             if (!loc) return;
+            if (this.exploreCd > 0) return;
             if (this.player.level < loc.minLevel) {
                 if (!silent) this.log(`境界不足，${loc.name}需要达到 ${realmName(loc.minLevel)}`, 'warning');
                 return;
@@ -421,7 +467,7 @@ export const useIdleStore = defineStore('idleXiuxian', {
             if (opts.runStats) player.stats = { ...player.stats, ...opts.runStats };
             if (opts.runHealth) { player.health = opts.runHealth; player.maxHealth = opts.runMaxHealth || player.maxHealth; }
             const result = runBattle(player, monster, { maxRounds: opts.maxRounds || 30 });
-            this.battle = { monster, ...result, time: Date.now() };
+            this.battle = { monster, ...result, playerMaxHealth: player.maxHealth, time: Date.now() };
             // 胜利结算
             if (result.win) {
                 this.player.counters.killCount++;
@@ -526,6 +572,7 @@ export const useIdleStore = defineStore('idleXiuxian', {
         unequipSlot(slot) {
             const item = this.player.equipment[slot];
             if (!item) return;
+            if (this.player.inventory.length >= 200) { this.log('背包已满，请先整理装备后再卸下。', 'warning'); return; }
             this.player.equipment[slot] = null;
             delete this.player.equipment[slot];
             this.player.inventory.unshift(item);
@@ -906,11 +953,55 @@ export const useIdleStore = defineStore('idleXiuxian', {
         exportSave() {
             return JSON.stringify({ version: 1, exportAt: new Date().toISOString(), player: this.player });
         },
+        backupSave() {
+            const success = createBackup(this.player);
+            this.log(success ? '本地备份已保存，可在设置中恢复。' : '备份未成功，请导出存档。', success ? 'success' : 'warning');
+            return success;
+        },
+        restoreBackup() {
+            const backup = readBackup();
+            if (!backup) { this.log('没有可恢复的本地备份。', 'warning'); return false; }
+            return this.importSave(backup);
+        },
         importSave(json) {
             try {
                 const data = JSON.parse(json);
-                if (!data.player) throw new Error('格式错误');
+                if (data?.version !== 1 || !data.player) throw new Error('不支持的存档格式');
+                validateSave(data.player, createPlayer());
+                if (!Number.isInteger(data.player.level) || data.player.level < 1 || data.player.level > MAX_LEVEL) throw new Error('境界无效');
+                for (const key of ['spirit', 'cultivation', 'spiritStones', 'points', 'lastOnline']) {
+                    if (data.player[key] < 0) throw new Error(`${key} 不可为负数`);
+                }
+                const equipment = [...data.player.inventory, ...Object.values(data.player.equipment).filter(Boolean)];
+                for (const item of equipment) {
+                    if (!item || typeof item.name !== 'string' || !QUALITIES[item.quality] ||
+                        typeof item.slot !== 'string' || !item.stats || typeof item.stats !== 'object' || Array.isArray(item.stats) ||
+                        !Number.isFinite(item.level) || !Number.isFinite(item.enhanceLevel)) throw new Error('装备数据无效');
+                }
+                for (const pet of data.player.pets) {
+                    if (!pet || !RARITIES[pet.rarity] || !pet.bonus || typeof pet.bonus !== 'object' ||
+                        !Number.isFinite(pet.level) || !Number.isFinite(pet.star)) throw new Error('灵宠数据无效');
+                }
+                for (const effect of data.player.activeEffects) {
+                    if (!effect || typeof effect.type !== 'string' || !Number.isFinite(effect.value) ||
+                        !Number.isFinite(effect.remain)) throw new Error('效果数据无效');
+                }
+                for (const herb of data.player.herbs) {
+                    if (!herb || !herbById(herb.id) || !Number.isFinite(herb.count) || !Number.isFinite(herb.value)) throw new Error('灵草数据无效');
+                }
+                for (const pill of data.player.pills) {
+                    if (!pill || !pillRecipes.some(r => r.id === pill.recipeId) || !Number.isFinite(pill.count)) throw new Error('丹药数据无效');
+                }
+                if (!createBackup(this.player)) throw new Error('无法备份当前进度，请先导出存档');
                 this.player = data.player;
+                this.player.lastOnline = Date.now();
+                this._lastTick = Date.now();
+                this.offlineReport = null;
+                this.lastOfflineReport = null;
+                rememberOfflineReport(null);
+                this.autoExploreMessage = '';
+                this.exploreCd = 0;
+                this.gachaResults = null;
                 this.logs = [];
                 this.dungeon = null;
                 this.battle = null;
@@ -922,6 +1013,9 @@ export const useIdleStore = defineStore('idleXiuxian', {
             }
         },
         resetGame() {
+            if (!createBackup(this.player)) return false;
+            this.lastOfflineReport = null; this.offlineReport = null; this.autoExploreMessage = '';
+            rememberOfflineReport(null);
             this.player = {
                 name: '无名修士', createdAt: nowSec(), lastOnline: Date.now(),
                 level: 1, cultivation: 0, spirit: 0, spiritStones: 0,
@@ -943,7 +1037,7 @@ export const useIdleStore = defineStore('idleXiuxian', {
 
     persist: {
         key: 'idle-xiuxian-fusion',
-        storage: localStorage,
+        storage: saveStorage,
         pick: ['player']
     }
 });

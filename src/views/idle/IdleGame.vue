@@ -12,6 +12,8 @@
             <!-- 铭牌头部 -->
             <NameplateHeader @rename="renameVisible = true" @breakthrough="store.breakthrough()" />
 
+            <JourneyGuide @navigate="activeTab = $event" />
+
             <!-- 主体: 左侧功能 / 右侧日志 -->
             <div class="idle-body">
                 <div class="idle-tabs ink-panel">
@@ -69,6 +71,7 @@
     import '@/idle/theme.css';
     import { useIdleStore } from '@/idle/store';
     import { fmt, fmtTime } from '@/idle/utils';
+    import JourneyGuide from './components/JourneyGuide.vue';
     import SpiritMotes from './components/SpiritMotes.vue';
     import NameplateHeader from './components/NameplateHeader.vue';
     import TabCultivate from './components/TabCultivate.vue';
@@ -87,7 +90,7 @@
     const renameVisible = ref(false);
     const newName = ref('');
     const flash = ref(null);
-    let worker = null;
+    let tickTimer = null;
     let flashTimer = null;
 
     const playFlash = name => {
@@ -106,16 +109,25 @@
         if (nv > ov) playFlash('realm');
     });
 
+    const rememberOnline = () => {
+        store.player.lastOnline = Date.now();
+    };
+
     onMounted(() => {
         store.init();
-        // 注意: new URL() 内必须用相对路径(不能用@别名), 否则 dev 模式下 worker 无法加载
-        worker = new Worker(new URL('../../idle/worker.js', import.meta.url), { type: 'module' });
-        worker.onmessage = () => store.tick();
+        // 原有 tick 使用真实时间差。普通计时器也可用于离线 HTML 原版包。
+        tickTimer = setInterval(() => {
+            store.tick();
+            rememberOnline();
+        }, 1000);
+        window.addEventListener('pagehide', rememberOnline);
     });
 
     onUnmounted(() => {
-        if (worker) worker.terminate();
-        store.player.lastOnline = Date.now();
+        clearInterval(tickTimer);
+        clearTimeout(flashTimer);
+        window.removeEventListener('pagehide', rememberOnline);
+        rememberOnline();
     });
 </script>
 
