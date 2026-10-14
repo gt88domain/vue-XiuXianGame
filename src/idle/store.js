@@ -503,7 +503,7 @@ export const useIdleStore = defineStore('idleXiuxian', {
                 // 掉落
                 const dropChance = monster.type === 'boss' ? 1 : monster.type === 'elite' ? 0.35 : 0.12;
                 if (chance(dropChance)) {
-                    const eq = genEquipment(monster.level, { luck: this.luck, quality: monster.type === 'boss' ? pick(['warning', 'danger', 'pink']) : undefined });
+                    const eq = genEquipment(Math.min(monster.level, this.player.level), { luck: this.luck, quality: monster.type === 'boss' ? pick(['warning', 'danger', 'pink']) : undefined });
                     this.gainEquipment(eq);
                     this.log(`【${monster.name}】掉落了 [${QUALITIES[eq.quality].name}] ${eq.name}!`, 'victory');
                 }

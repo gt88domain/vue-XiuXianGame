@@ -7,6 +7,7 @@ const { createPinia, setActivePinia } = await import('pinia');
 const { useIdleStore } = await import('../src/idle/store.js');
 const { genEquipment, QUALITY_ORDER } = await import('../src/idle/data/equipment.js');
 const { freshProgression, equipmentQualityCeiling } = await import('../src/idle/progression.js');
+const { genMonster } = await import('../src/idle/data/monsters.js');
 const { BUFF_OPTIONS } = await import('../src/idle/data/dungeon.js');
 
 function freshPlayer() {
@@ -318,4 +319,16 @@ test('新角色默认保留低阶掉落，得到装备后能立刻查看穿戴',
     assert.equal(store.player.inventory.length, 1);
     store.equipItem(item.id);
     assert.equal(store.player.equipment[item.slot].id, item.id);
+});
+
+test('越级击败首领也不会提前掉落下一境界品质', () => {
+    const store = freshPlayer(); store.player.level = 9;
+    store.player.alloc.attack = 10000; store.player.alloc.health = 10000;
+    const originalRandom = Math.random; Math.random = () => .9;
+    try {
+        store.fight(genMonster(10, 'boss'));
+        assert.equal(store.player.inventory.length, 1);
+        assert.equal(store.player.inventory[0].quality, 'primary');
+        assert.equal(store.player.inventory[0].level, 9);
+    } finally { Math.random = originalRandom; }
 });
