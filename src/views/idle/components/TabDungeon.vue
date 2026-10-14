@@ -3,8 +3,7 @@
         <!-- 未进入 -->
         <template v-if="!store.dungeon">
             <div class="intro">
-                🏔️ 秘境探索: roguelike 玩法(来自 idle-xiuxian)。共 {{ MAX_FLOOR }} 层，每层一场战斗，
-                胜利后三选一强化，强化只在本次秘境生效。第10层为守关BOSS，通关有丰厚奖励！
+                🏔️ 初试5层、普通7层、困难9层、炼狱10层。战斗之间选择强化或回血，最后一层挑战守关者。入境消耗灵力，失败保留已获得的材料；通关记录用于大境界历练。
             </div>
             <div class="diff-list">
                 <div v-for="(cfg, d) in DIFFICULTIES" :key="d" class="diff-card"
@@ -12,12 +11,12 @@
                     @click="store.player.level >= cfg.minLevel && (pickedDiff = d)">
                     <div class="diff-name">{{ cfg.name }}</div>
                     <div class="diff-line">怪物: 血×{{ cfg.healthMod }} 攻×{{ cfg.damageMod }}</div>
-                    <div class="diff-line">奖励×{{ cfg.rewardMod }}</div>
+                    <div class="diff-line">{{ cfg.floors }} 层 · 奖励×{{ cfg.rewardMod }}</div><div class="diff-line">入境消耗 {{ fmt(store.dungeonEntryCost(d)) }} 灵力</div>
                     <div class="diff-line" v-if="store.player.level < cfg.minLevel">需 {{ realmName(cfg.minLevel) }}</div>
                 </div>
             </div>
             <div class="start-btn">
-                <el-button type="primary" size="large" @click="store.dungeonStart(pickedDiff)">进入秘境</el-button>
+                <el-button type="primary" size="large" :disabled="store.player.level < DIFFICULTIES[pickedDiff].minLevel || store.player.spirit < store.dungeonEntryCost(pickedDiff)" @click="store.dungeonStart(pickedDiff)">进入秘境</el-button>
             </div>
             <div class="stat-line">历史通关层数: {{ store.player.counters.dungeonClear }} · 炼狱通关: {{ store.player.counters.dungeonHellClear ? '已达成' : '未达成' }}</div>
         </template>
@@ -26,7 +25,7 @@
         <template v-else>
             <div class="run-head">
                 <el-tag>{{ DIFFICULTIES[store.dungeon.difficulty].name }}</el-tag>
-                <span class="floor">第 {{ store.dungeon.floor }} / {{ MAX_FLOOR }} 层</span>
+                <span class="floor">第 {{ store.dungeon.floor }} / {{ store.dungeon.floorMax }} 层</span>
                 <el-progress class="hp-bar" :percentage="Math.max(0, Math.floor((store.dungeon.runHealth / store.dungeon.maxHealth) * 100))"
                     :stroke-width="14" :format="() => fmt(store.dungeon.runHealth)" />
                 <el-button v-if="store.dungeon.phase === 'choose'" size="small" @click="store.dungeonExit()">离开秘境</el-button>
@@ -49,9 +48,9 @@
             </div>
 
             <div v-else-if="store.dungeon.finished" class="finish-box">
-                <el-result :icon="store.dungeon.floor >= MAX_FLOOR ? 'success' : 'warning'"
-                    :title="store.dungeon.floor >= MAX_FLOOR ? '秘境通关!' : '探索结束'"
-                    :sub-title="store.dungeon.floor >= MAX_FLOOR ? '宝箱装备已放入背包' : '下次一定'">
+                <el-result :icon="store.dungeon.cleared ? 'success' : 'warning'"
+                    :title="store.dungeon.cleared ? '秘境通关!' : '探索结束'"
+                    :sub-title="store.dungeon.cleared ? '宝箱装备已放入背包' : '下次一定'">
                     <template #extra>
                         <el-button type="primary" @click="store.dungeonExit()">返回</el-button>
                     </template>
@@ -72,7 +71,7 @@
     import { ref } from 'vue';
     import { useIdleStore } from '@/idle/store';
     import { fmt } from '@/idle/utils';
-    import { DIFFICULTIES, MAX_FLOOR } from '@/idle/data/dungeon';
+    import { DIFFICULTIES } from '@/idle/data/dungeon';
     import { realmName } from '@/idle/data/realms';
 
     const store = useIdleStore();

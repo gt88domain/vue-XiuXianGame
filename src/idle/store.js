@@ -4,6 +4,8 @@
 //   vue-XiuXianGame  : 境界点分配/装备分解/世界BOSS/每日签到/称号/灵宠捕捉/自动出售
 
 import { defineStore } from 'pinia';
+import { BALANCE_VERSION, CULTIVATION_ACTIONS, ADVENTURE_SHARE, layerTrainingSeconds, baseSpiritRegen, freshProgression, majorGoals, enhancementCeiling } from './progression';
+import { SAVE_KEY, saveStorage, createBackup, readBackup, readOfflineReport, rememberOfflineReport } from './save-storage';
 import { realms, getRealm, realmName, MAX_LEVEL, maxCultivationOf, economyFactor, combatFactor } from './data/realms';
 import { genEquipment, enhanceCost, enhanceSuccess, enhancedStats, reforge, salvageGain, QUALITIES, QUALITY_ORDER, equipScore, REFORGE_CFG } from './data/equipment';
 import { genMonster } from './data/monsters';
@@ -12,7 +14,7 @@ import { getRandomHerb, herbById } from './data/herbs';
 import { pillRecipes, pillGrades, calculatePillEffect } from './data/pills';
 import { locations } from './data/locations';
 import { rollEvent, resolveEvent } from './data/events';
-import { DIFFICULTIES, MAX_FLOOR, rollBuffOptions } from './data/dungeon';
+import { DIFFICULTIES, rollBuffOptions } from './data/dungeon';
 import { genWorldBoss } from './data/boss';
 import { achievements } from './data/achievements';
 import { runBattle } from './combat';
@@ -21,6 +23,31 @@ import { rint, rfloat, pick, chance, uid, fmt, pct, fmtTime } from './utils';
 const nowSec = () => Math.floor(Date.now() / 1000);
 const today = () => new Date().toISOString().slice(0, 10);
 
+// Validate the existing v1 format before replacing a live player.
+function validateSave(value, template, path = 'player', depth = 0) {
+    if (depth > 24) throw new Error('存档嵌套过深');
+    if (value === undefined) throw new Error(`${path} 缺失`);
+    if (typeof value === 'number' && !Number.isFinite(value)) throw new Error(`${path} 数值无效`);
+    if (template !== null && typeof template !== 'object' && typeof value !== typeof template) {
+        throw new Error(`${path} 类型错误`);
+    }
+    if (Array.isArray(template) && !Array.isArray(value)) throw new Error(`${path} 应为列表`);
+    if (template && typeof template === 'object' && !Array.isArray(template) &&
+        (!value || typeof value !== 'object' || Array.isArray(value))) throw new Error(`${path} 应为对象`);
+    if (value && typeof value === 'object') {
+        for (const key of Object.keys(value)) {
+            if (['__proto__', 'constructor', 'prototype'].includes(key)) throw new Error('存档字段无效');
+            validateSave(value[key], template?.[key] ?? null, `${path}.${key}`, depth + 1);
+        }
+        if (template && !Array.isArray(template)) {
+            for (const key of Object.keys(template)) {
+                validateSave(value[key], template[key], `${path}.${key}`, depth + 1);
+            }
+        }
+    }
+}
+
+
 const emptyCounters = () => ({
     breakthroughCount: 0, explorationCount: 0, killCount: 0, bossKills: 0,
     pillsCrafted: 0, pillsConsumed: 0, equipmentFound: 0, pinkFound: 0, enhanceCount: 0,
@@ -28,9 +55,8 @@ const emptyCounters = () => ({
     eventTriggered: 0, unlockedPillRecipes: 0, checkinTotal: 0, level: 1
 });
 
-export const useIdleStore = defineStore('idleXiuxian', {
-    state: () => ({
-        player: {
+const createPlayer = () => ({
+            progression: freshProgression(1),
             name: '无名修士',
             createdAt: nowSec(),
             lastOnline: Date.now(),
@@ -62,20 +88,31 @@ export const useIdleStore = defineStore('idleXiuxian', {
             checkin: { lastDate: null, streak: 0 },
             boss: null,
             nextBossTime: 0,
-            settings: { autoSellQualities: ['info', 'success'], autoExplore: false, autoCultivate: false, exploreLocation: 'newbie_village' }
-        },
+            settings: { autoSellQualities: [], autoExplore: false, autoCultivate: false, exploreLocation: 'newbie_village' }
+        });
+
+export const useIdleStore = defineStore('idleXiuxian', {
+    state: () => ({
+        player: createPlayer(),
         // 非持久化运行时状态
         logs: [],
         battle: null,
         exploreCd: 0,
         offlineReport: null,
         dungeon: null,
-        gachaResults: null
+        gachaResults: null,
+        autoExploreMessage: '',
+        lastOfflineReport: null
     }),
 
     getters: {
         realm: s => getRealm(s.player.level),
         isMaxLevel: s => s.player.level >= MAX_LEVEL,
+        majorGoals: s => majorGoals(s.player),
+        stageGoals: s => majorGoals(s.player, true),
+        breakthroughBlockers() { return this.majorGoals.filter(g => !g.done); },
+        trainingSeconds: s => layerTrainingSeconds(s.player.level),
+        enhancementLimit: s => enhancementCeiling(s.player.level),
 
         // 幸运值(基础 + 清心丹/算命等buff + 装备luck)
         luck(state) {
@@ -109,12 +146,12 @@ export const useIdleStore = defineStore('idleXiuxian', {
 
         // 单次修炼获得的修为
         cultivateGain(state) {
-            const gain = maxCultivationOf(state.player.level) * 0.05 * this.cultivationRateMult;
+            const gain = maxCultivationOf(state.player.level) / CULTIVATION_ACTIONS * this.cultivationRateMult;
             return gain;
         },
         // 单次修炼消耗的灵力
         cultivateCost(state) {
-            return this.cultivateGain * (3 + getRealm(state.player.level).stageIndex * 1.5);
+            return baseSpiritRegen(state.player.level) * layerTrainingSeconds(state.player.level) / CULTIVATION_ACTIONS;
         },
 
         // 称号加成
@@ -219,23 +256,33 @@ export const useIdleStore = defineStore('idleXiuxian', {
 
         // ---------- 初始化(离线收益) ----------
         init() {
+            let oldBalance = false;
+            try { const saved = JSON.parse(saveStorage.getItem(SAVE_KEY)); oldBalance = !!saved?.player && !saved.player.progression?.version; } catch { /* persistence plugin handles invalid JSON */ }
+            if (oldBalance || !this.player.progression || this.player.progression.version !== BALANCE_VERSION) {
+                if (createBackup(this.player)) this.player.cultivation = Math.min(this.player.cultivation, this.realm.maxCultivation);
+                this.player.progression = freshProgression(this.player.level);
+                this.log('修行节奏已更新：现有境界与装备保留，大境界突破需要完成历练。', 'info');
+            }
+            this.lastOfflineReport = readOfflineReport();
             const now = Date.now();
-            const elapsed = Math.min((now - this.player.lastOnline) / 1000, 8 * 3600);
+            const elapsed = Math.max(0, Math.min((now - this.player.lastOnline) / 1000, 8 * 3600));
             this.player.lastOnline = now;
             if (elapsed > 60) {
-                const gain = Math.min(this.spiritRegen * elapsed * 0.6, this.spiritCap);
+                const gain = Math.max(0, Math.min(this.spiritRegen * elapsed * 0.6, this.spiritCap - this.player.spirit));
                 this.player.spirit += gain;
                 this.offlineReport = { elapsed, spirit: gain };
+                this.lastOfflineReport = { elapsed, spirit: gain };
+                rememberOfflineReport(this.lastOfflineReport);
                 this.log(`闭关修炼 ${fmtTime(elapsed)}，恢复灵力 +${fmt(gain)}`, 'success');
             }
             this._lastTick = Date.now();
             this.player.counters.level = Math.max(this.player.counters.level, this.player.level);
         },
 
-        // ---------- 每秒 tick(worker驱动) ----------
+        // ---------- 每秒 tick(按真实时间差结算) ----------
         tick() {
             const now = Date.now();
-            const dt = Math.min((now - (this._lastTick || now)) / 1000, 120);
+            const dt = Math.max(0, Math.min((now - (this._lastTick || now)) / 1000, 120));
             this._lastTick = now;
             // 灵力恢复
             if (this.player.spirit < this.spiritCap) {
@@ -252,33 +299,43 @@ export const useIdleStore = defineStore('idleXiuxian', {
             if (this.player.settings.autoCultivate) this.cultivate('auto');
             // 自动探索
             if (this.player.settings.autoExplore && this.exploreCd <= 0) {
-                this.explore(this.player.settings.exploreLocation, true);
+                const loc = locations.find(l => l.id === this.player.settings.exploreLocation);
+                if (!loc || this.player.level < loc.minLevel) {
+                    this.player.settings.autoExplore = false;
+                    this.autoExploreMessage = '自动探索已停止：当前地点尚未解锁，请选择可探索的地点。';
+                } else if (this.player.inventory.length >= 200) {
+                    this.player.settings.autoExplore = false;
+                    this.autoExploreMessage = '自动探索已停止：背包已满，请先分解不需要的装备。';
+                } else if (this.player.spirit < loc.spiritCost) {
+                    this.autoExploreMessage = `等待灵力恢复，需要 ${fmt(loc.spiritCost)} 灵力后继续探索。`;
+                } else {
+                    this.autoExploreMessage = '';
+                    this.explore(loc.id, true);
+                }
             }
         },
 
         // ---------- 修炼 ----------
         cultivate(mode = 'one') {
             let done = 0, doubled = 0, gained = 0;
-            const limit = mode === 'ten' ? 10 : mode === 'hundred' ? 100 : Infinity;
+            const limit = mode === 'one' ? 1 : mode === 'ten' ? 10 : mode === 'hundred' ? 100 : Infinity;
             while (done < limit) {
-                if (mode !== 'one' && mode !== 'ten' && mode !== 'hundred') {
-                    // auto: 到达瓶颈即停
-                    if (this.canBreakthrough) break;
-                }
+                if (this.canBreakthrough) break;
                 const cost = this.cultivateCost;
                 if (this.player.spirit < cost) break;
                 this.player.spirit -= cost;
                 let gain = this.cultivateGain;
                 if (Math.random() < 0.3 * this.luck) { gain *= 2; doubled++; }
-                this.player.cultivation += gain;
-                gained += gain;
+                const actualGain = Math.min(gain, this.realm.maxCultivation - this.player.cultivation);
+                this.player.cultivation += actualGain;
+                gained += actualGain;
                 done++;
                 if (this.canBreakthrough && mode !== 'one' && mode !== 'ten' && mode !== 'hundred') break;
             }
             if (done > 0) {
                 this.log(`修炼 ${done} 次，修为 +${fmt(gained)}${doubled ? `，触发顿悟${doubled}次` : ''}`, 'cultivate');
             } else if (mode !== 'auto') {
-                this.log('灵力不足，无法修炼。等待灵力恢复或服用回灵丹。', 'warning');
+                this.log(this.canBreakthrough ? '修为已满，请先突破或完成历练条件。' : '灵力不足，无法修炼。等待灵力恢复或服用回灵丹。', 'warning');
             }
             return done;
         },
@@ -292,15 +349,15 @@ export const useIdleStore = defineStore('idleXiuxian', {
                 this.log('已达九天玄仙九重圆满，天下无敌！', 'success');
                 return false;
             }
-            this.player.cultivation -= maxCultivationOf(this.player.level);
+            if (this.breakthroughBlockers.length) { this.log('大境界突破还需：' + this.breakthroughBlockers.map(g => g.label).join('、'), 'warning'); return false; }
+            this.player.cultivation = 0;
             this.player.level++;
             this.player.counters.breakthroughCount++;
             this.player.counters.level = Math.max(this.player.counters.level, this.player.level);
             this.player.points += 3;
             this.player.spiritRateBase = Math.round((this.player.spiritRateBase + 0.02) * 100) / 100;
-            const reward = this.spiritRegen * 60;
-            this.player.spirit = Math.min(this.spiritCap, this.player.spirit + reward);
-            this.log(`突破成功！当前境界: ${realmName(this.player.level)}，获得3点境界点，灵力 +${fmt(reward)}`, 'breakthrough');
+            this.player.progression = { ...this.player.progression, adventureLevel:this.player.level, adventureCultivation:0 };
+            this.log(`突破成功！当前境界: ${realmName(this.player.level)}，获得3点境界点。下一段仙途已开启`, 'breakthrough');
             this.checkAchievements();
             return true;
         },
@@ -312,10 +369,23 @@ export const useIdleStore = defineStore('idleXiuxian', {
             this.player.points -= n;
         },
 
+        gainAdventureCultivation(amount) {
+            const p = this.player;
+            if (!p.progression || p.progression.adventureLevel !== p.level) {
+                p.progression = { ...freshProgression(p.level), trials:p.progression?.trials || [] };
+            }
+            const maximum = this.realm.maxCultivation;
+            const gain = Math.max(0, Math.min(amount, maximum * 0.025, maximum * ADVENTURE_SHARE - p.progression.adventureCultivation, maximum - p.cultivation));
+            p.progression.adventureCultivation += gain;
+            p.cultivation += gain;
+            return gain;
+        },
+
         // ---------- 探索 ----------
         explore(locationId, silent = false) {
             const loc = locations.find(l => l.id === locationId);
             if (!loc) return;
+            if (this.exploreCd > 0) return;
             if (this.player.level < loc.minLevel) {
                 if (!silent) this.log(`境界不足，${loc.name}需要达到 ${realmName(loc.minLevel)}`, 'warning');
                 return;
@@ -339,7 +409,7 @@ export const useIdleStore = defineStore('idleXiuxian', {
                     const gain = Math.floor(amount * ef);
                     this.player.spiritStones += gain; parts.push(`灵石+${fmt(gain)}`);
                 } else if (r.type === 'cultivation') {
-                    this.player.cultivation += amount; parts.push(`修为+${fmt(amount)}`);
+                    const gain = this.gainAdventureCultivation(amount); parts.push(`修为+${fmt(gain)}`);
                 } else if (r.type === 'herb') {
                     const n = rint(1, 2 + Math.floor(stageIdx / 3));
                     for (let i = 0; i < n; i++) this.gainHerb(getRandomHerb(luck));
@@ -379,12 +449,12 @@ export const useIdleStore = defineStore('idleXiuxian', {
             const res = resolveEvent(evt, this.player.level);
             this.log(`[奇遇·${evt.name}] ${evt.description}`, evt.good ? 'event' : 'danger');
             switch (res.type) {
-                case 'cultivation': this.player.cultivation += res.amount; this.log(res.text + ` 修为+${fmt(res.amount)}`, 'event'); break;
+                case 'cultivation': { const gain = this.gainAdventureCultivation(res.amount); this.log(res.text + ` 修为+${fmt(gain)}`, 'event'); break; }
                 case 'spirit': this.player.spirit = Math.min(this.spiritCap, this.player.spirit + res.amount); this.log(res.text + ` 灵力+${fmt(res.amount)}`, 'event'); break;
-                case 'both':
-                    this.player.cultivation += res.cultivation;
+                case 'both': {
+                    const gain = this.gainAdventureCultivation(res.cultivation);
                     this.player.spirit = Math.min(this.spiritCap, this.player.spirit + res.spirit);
-                    this.log(`${res.text} 修为+${fmt(res.cultivation)} 灵力+${fmt(res.spirit)}`, 'event'); break;
+                    this.log(`${res.text} 修为+${fmt(gain)} 灵力+${fmt(res.spirit)}`, 'event'); break; }
                 case 'stones': this.player.spiritStones += res.amount; this.log(res.text + ` 灵石+${fmt(res.amount)}`, 'event'); break;
                 case 'lose_cultivation': this.player.cultivation = Math.max(0, this.player.cultivation - res.amount); this.log(`${res.text} 修为-${fmt(res.amount)}`, 'danger'); break;
                 case 'lose_both':
@@ -393,7 +463,7 @@ export const useIdleStore = defineStore('idleXiuxian', {
                     this.log(`${res.text} 灵力修为各-${fmt(res.amount)}`, 'danger'); break;
                 case 'buff':
                     this.player.activeEffects.push({ ...res.buff, remain: res.buff.duration, id: uid() });
-                    if (res.cultivation) this.player.cultivation += res.cultivation;
+                    if (res.cultivation) this.gainAdventureCultivation(res.cultivation);
                     this.log(res.text, 'event'); break;
                 case 'equip': this.gainEquipment(genEquipment(this.player.level, { luck: this.luck })); this.log(res.text, 'event'); break;
                 case 'pet': this.gainPet(genPet(null, this.player.level)); this.log(res.text, 'event'); break;
@@ -421,20 +491,19 @@ export const useIdleStore = defineStore('idleXiuxian', {
             if (opts.runStats) player.stats = { ...player.stats, ...opts.runStats };
             if (opts.runHealth) { player.health = opts.runHealth; player.maxHealth = opts.runMaxHealth || player.maxHealth; }
             const result = runBattle(player, monster, { maxRounds: opts.maxRounds || 30 });
-            this.battle = { monster, ...result, time: Date.now() };
+            this.battle = { monster, ...result, playerMaxHealth: player.maxHealth, time: Date.now() };
             // 胜利结算
             if (result.win) {
                 this.player.counters.killCount++;
                 const scale = economyFactor(this.player.level) / economyFactor(Math.max(1, monster.level - 4));
                 const stones = Math.floor(monster.reward.stones * Math.max(0.2, Math.min(scale, 8)));
                 this.player.spiritStones += stones;
-                const cult = Math.floor(monster.reward.cultivation * Math.max(0.2, Math.min(scale, 8)));
-                this.player.cultivation += cult;
+                const cult = this.gainAdventureCultivation(Math.floor(monster.reward.cultivation * Math.max(0.2, Math.min(scale, 8))));
                 this.log(`战胜【${monster.name}】! 灵石+${fmt(stones)} 修为+${fmt(cult)}`, 'victory');
                 // 掉落
                 const dropChance = monster.type === 'boss' ? 1 : monster.type === 'elite' ? 0.35 : 0.12;
                 if (chance(dropChance)) {
-                    const eq = genEquipment(monster.level, { luck: this.luck, quality: monster.type === 'boss' ? pick(['warning', 'danger', 'pink']) : undefined });
+                    const eq = genEquipment(Math.min(monster.level, this.player.level), { luck: this.luck, quality: monster.type === 'boss' ? pick(['warning', 'danger', 'pink']) : undefined });
                     this.gainEquipment(eq);
                     this.log(`【${monster.name}】掉落了 [${QUALITIES[eq.quality].name}] ${eq.name}!`, 'victory');
                 }
@@ -526,6 +595,7 @@ export const useIdleStore = defineStore('idleXiuxian', {
         unequipSlot(slot) {
             const item = this.player.equipment[slot];
             if (!item) return;
+            if (this.player.inventory.length >= 200) { this.log('背包已满，请先整理装备后再卸下。', 'warning'); return; }
             this.player.equipment[slot] = null;
             delete this.player.equipment[slot];
             this.player.inventory.unshift(item);
@@ -561,6 +631,7 @@ export const useIdleStore = defineStore('idleXiuxian', {
             const item = this.player.inventory.find(i => i.id === id) || Object.values(this.player.equipment).find(i => i && i.id === id);
             if (!item) return;
             if (item.enhanceLevel >= 100) { this.log('装备已达最大强化等级', 'warning'); return; }
+            if (item.enhanceLevel >= this.enhancementLimit) { this.log(`当前境界强化上限 +${this.enhancementLimit}，突破后再来。`, 'warning'); return; }
             const cost = enhanceCost(item);
             if (this.player.reinforceStones < cost) { this.log(`炼器石不足，需要 ${cost}`, 'warning'); return; }
             this.player.reinforceStones -= cost;
@@ -753,31 +824,40 @@ export const useIdleStore = defineStore('idleXiuxian', {
         },
 
         // ---------- 秘境副本(roguelike) ----------
+        dungeonEntryCost(difficulty) { return Math.ceil(baseSpiritRegen(this.player.level) * (DIFFICULTIES[difficulty]?.entrySeconds || 45)); },
         dungeonStart(difficulty) {
             const cfg = DIFFICULTIES[difficulty];
+            if (!cfg || (this.dungeon && !this.dungeon.finished)) return;
+            const entryCost = this.dungeonEntryCost(difficulty);
             if (this.player.level < cfg.minLevel) {
                 this.log(`${cfg.name}难度需要 ${realmName(cfg.minLevel)}`, 'warning');
                 return;
             }
+            if (this.player.spirit < entryCost) { this.log(`入境需要 ${fmt(entryCost)} 灵力，请先恢复。`, 'warning'); return; }
+            this.player.spirit -= entryCost;
             const st = this.stats;
             this.dungeon = {
                 difficulty,
+                entryLevel: this.player.level,
+                floorMax: cfg.floors,
+                cleared: false,
                 floor: 1,
                 maxHealth: st.health,
                 runHealth: st.health,
-                runStats: {},
+                runStats: { ...st },
                 options: [],
                 finished: false
             };
-            this.log(`进入秘境(${cfg.name})，共 ${MAX_FLOOR} 层`, 'dungeon');
+            this.log(`进入秘境(${cfg.name})，共 ${cfg.floors} 层`, 'dungeon');
             this.dungeonEncounter();
         },
         dungeonEncounter() {
             const d = this.dungeon;
             if (!d || d.finished) return;
             const cfg = DIFFICULTIES[d.difficulty];
-            const type = d.floor === MAX_FLOOR ? 'boss' : chance(0.25) ? 'elite' : 'normal';
-            const m = genMonster(this.player.level + d.floor - 1, type);
+            const type = d.floor === d.floorMax ? 'boss' : chance(0.25) ? 'elite' : 'normal';
+            const ceiling = d.difficulty === 1 ? (getRealm(d.entryLevel).stageIndex + 1) * 9 : MAX_LEVEL;
+            const m = genMonster(Math.min(ceiling, d.entryLevel + d.floor - 1), type);
             // 应用难度系数
             m.stats.health = Math.floor(m.stats.health * cfg.healthMod);
             m.stats.attack = Math.floor(m.stats.attack * cfg.damageMod);
@@ -792,18 +872,21 @@ export const useIdleStore = defineStore('idleXiuxian', {
                 autoHeal: this.stats.autoHeal
             };
             const result = runBattle(player, m, { maxRounds: 30 });
-            this.battle = { monster: m, ...result, time: Date.now() };
+            this.battle = { monster: m, ...result, playerMaxHealth:player.maxHealth, time: Date.now() };
             d.runHealth = result.playerHealth;
             if (result.win) {
                 const stones = Math.floor(m.reward.stones * (1 + d.floor * 0.1));
                 this.player.spiritStones += stones;
-                this.player.cultivation += m.reward.cultivation;
+                this.gainAdventureCultivation(m.reward.cultivation);
                 this.log(`第${d.floor}层击败【${m.name}】，灵石+${fmt(stones)}`, 'dungeon');
-                if (d.floor >= MAX_FLOOR) {
+                if (d.floor >= d.floorMax) {
                     // 通关
-                    this.player.counters.dungeonClear += MAX_FLOOR;
+                    this.player.counters.dungeonClear += d.floorMax;
+                    d.cleared = true;
+                    if (!this.player.progression.trials.includes(d.difficulty)) this.player.progression.trials.push(d.difficulty);
                     if (d.difficulty === 4) this.player.counters.dungeonHellClear = 1;
-                    const eq = genEquipment(this.player.level + 3, { quality: chance(0.5) ? 'danger' : 'warning', luck: this.luck });
+                    const tiers = {1:['success','primary'],2:['primary','purple'],3:['purple','warning'],4:['warning','danger']};
+                    const eq = genEquipment(this.player.level, { quality: tiers[d.difficulty][chance(0.35) ? 1 : 0], luck: this.luck });
                     this.gainEquipment(eq);
                     this.log(`秘境通关! 获得宝箱装备 [${QUALITIES[eq.quality].name}] ${eq.name}`, 'dungeon');
                     d.finished = true;
@@ -906,11 +989,57 @@ export const useIdleStore = defineStore('idleXiuxian', {
         exportSave() {
             return JSON.stringify({ version: 1, exportAt: new Date().toISOString(), player: this.player });
         },
+        backupSave() {
+            const success = createBackup(this.player);
+            this.log(success ? '本地备份已保存，可在设置中恢复。' : '备份未成功，请导出存档。', success ? 'success' : 'warning');
+            return success;
+        },
+        restoreBackup() {
+            const backup = readBackup();
+            if (!backup) { this.log('没有可恢复的本地备份。', 'warning'); return false; }
+            return this.importSave(backup);
+        },
         importSave(json) {
             try {
                 const data = JSON.parse(json);
-                if (!data.player) throw new Error('格式错误');
+                if (data?.version !== 1 || !data.player) throw new Error('不支持的存档格式');
+                data.player.progression ??= freshProgression(data.player.level);
+                if (data.player.progression.version !== BALANCE_VERSION) data.player.progression = freshProgression(data.player.level);
+                validateSave(data.player, createPlayer());
+                if (!Number.isInteger(data.player.level) || data.player.level < 1 || data.player.level > MAX_LEVEL) throw new Error('境界无效');
+                for (const key of ['spirit', 'cultivation', 'spiritStones', 'points', 'lastOnline']) {
+                    if (data.player[key] < 0) throw new Error(`${key} 不可为负数`);
+                }
+                const equipment = [...data.player.inventory, ...Object.values(data.player.equipment).filter(Boolean)];
+                for (const item of equipment) {
+                    if (!item || typeof item.name !== 'string' || !QUALITIES[item.quality] ||
+                        typeof item.slot !== 'string' || !item.stats || typeof item.stats !== 'object' || Array.isArray(item.stats) ||
+                        !Number.isFinite(item.level) || !Number.isFinite(item.enhanceLevel)) throw new Error('装备数据无效');
+                }
+                for (const pet of data.player.pets) {
+                    if (!pet || !RARITIES[pet.rarity] || !pet.bonus || typeof pet.bonus !== 'object' ||
+                        !Number.isFinite(pet.level) || !Number.isFinite(pet.star)) throw new Error('灵宠数据无效');
+                }
+                for (const effect of data.player.activeEffects) {
+                    if (!effect || typeof effect.type !== 'string' || !Number.isFinite(effect.value) ||
+                        !Number.isFinite(effect.remain)) throw new Error('效果数据无效');
+                }
+                for (const herb of data.player.herbs) {
+                    if (!herb || !herbById(herb.id) || !Number.isFinite(herb.count) || !Number.isFinite(herb.value)) throw new Error('灵草数据无效');
+                }
+                for (const pill of data.player.pills) {
+                    if (!pill || !pillRecipes.some(r => r.id === pill.recipeId) || !Number.isFinite(pill.count)) throw new Error('丹药数据无效');
+                }
+                if (!createBackup(this.player)) throw new Error('无法备份当前进度，请先导出存档');
                 this.player = data.player;
+                this.player.lastOnline = Date.now();
+                this._lastTick = Date.now();
+                this.offlineReport = null;
+                this.lastOfflineReport = null;
+                rememberOfflineReport(null);
+                this.autoExploreMessage = '';
+                this.exploreCd = 0;
+                this.gachaResults = null;
                 this.logs = [];
                 this.dungeon = null;
                 this.battle = null;
@@ -922,20 +1051,11 @@ export const useIdleStore = defineStore('idleXiuxian', {
             }
         },
         resetGame() {
-            this.player = {
-                name: '无名修士', createdAt: nowSec(), lastOnline: Date.now(),
-                level: 1, cultivation: 0, spirit: 0, spiritStones: 0,
-                reinforceStones: 20, refinementStones: 10, petEssence: 0,
-                luckBase: 1, spiritRateBase: 1, alchemyRate: 1,
-                points: 0, alloc: { attack: 0, health: 0, defense: 0, speed: 0 },
-                herbs: [], pills: [], pillFragments: {}, pillRecipes: [], activeEffects: [],
-                equipment: {}, inventory: [], pets: [], activePetId: null,
-                title: null, unlockedTitles: [], achievements: [],
-                counters: emptyCounters(),
-                checkin: { lastDate: null, streak: 0 },
-                boss: null, nextBossTime: 0,
-                settings: { autoSellQualities: ['info', 'success'], autoExplore: false, autoCultivate: false, exploreLocation: 'newbie_village' }
-            };
+            if (!createBackup(this.player)) return false;
+            this.lastOfflineReport = null; this.offlineReport = null; this.autoExploreMessage = '';
+            rememberOfflineReport(null);
+            this.player = createPlayer();
+            this.exploreCd = 0; this._lastTick = Date.now();
             this.logs = []; this.battle = null; this.dungeon = null; this.gachaResults = null;
             this.log('轮回重修，一切归零...', 'breakthrough');
         }
@@ -943,7 +1063,7 @@ export const useIdleStore = defineStore('idleXiuxian', {
 
     persist: {
         key: 'idle-xiuxian-fusion',
-        storage: localStorage,
+        storage: saveStorage,
         pick: ['player']
     }
 });

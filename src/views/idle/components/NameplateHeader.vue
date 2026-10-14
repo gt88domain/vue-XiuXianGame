@@ -6,7 +6,7 @@
 
             <!-- 名号 -->
             <div class="plate-who">
-                <div class="plate-name" @click="$emit('rename')">
+                <div class="plate-name" role="button" tabindex="0" @keydown.enter="$emit('rename')" @keydown.space.prevent="$emit('rename')" @click="$emit('rename')">
                     {{ store.player.name }}
                     <span v-if="store.player.title" class="plate-title">〔{{ store.player.title }}〕</span>
                     <el-icon style="font-size:13px; opacity:.7"><EditPen /></el-icon>
@@ -25,7 +25,7 @@
                 <span class="pchip">◈ 灵石 <b>{{ fmt(store.player.spiritStones) }}</b></span>
                 <span class="pchip">炼器石 <b>{{ fmt(store.player.reinforceStones) }}</b></span>
                 <span class="pchip" v-if="store.player.petEssence > 0">精华 <b>{{ fmt(store.player.petEssence) }}</b></span>
-                <span class="pchip hot" v-if="store.canBreakthrough" @click="$emit('breakthrough')">● 可突破</span>
+                <span class="pchip hot" role="button" tabindex="0" @keydown.enter="$emit('breakthrough')" @keydown.space.prevent="$emit('breakthrough')" v-if="store.canBreakthrough" @click="$emit('breakthrough')">{{ store.breakthroughBlockers.length ? '○ 待完成历练' : '● 可突破' }}</span>
             </div>
         </div>
 

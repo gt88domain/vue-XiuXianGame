@@ -374,12 +374,12 @@
     position: relative;
     z-index: 2;
     display: grid;
-    grid-template-columns: 1fr 292px;
+    grid-template-columns: minmax(0, 1fr) 292px;
     gap: 12px;
     align-items: start;
 }
 
-.idle-tabs.ink-panel { padding: 4px 14px 10px; }
+.idle-tabs.ink-panel { min-width: 0; padding: 4px 14px 10px; }
 
 .idle-log.ink-panel {
     display: flex;
@@ -819,7 +819,7 @@
 
 /* 响应式 */
 @media (max-width: 860px) {
-    .idle-body { grid-template-columns: 1fr; }
+    .idle-body { grid-template-columns: minmax(0, 1fr); }
 
     .idle-log { height: 300px !important; order: 2; }
 

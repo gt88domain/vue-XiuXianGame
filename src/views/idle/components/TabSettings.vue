@@ -8,18 +8,31 @@
                 <el-upload :show-file-list="false" :auto-upload="false" accept=".json" :on-change="onFile">
                     <el-button type="success">导入存档</el-button>
                 </el-upload>
-                <el-popconfirm title="确定要轮回重修吗? 所有数据将清空!" @confirm="store.resetGame()">
+                <el-popconfirm confirm-button-text="备份并重开" cancel-button-text="取消" title="确定要轮回重修吗? 所有数据将清空!" @confirm="store.resetGame()">
                     <template #reference>
                         <el-button type="danger">轮回重修(重置)</el-button>
                     </template>
                 </el-popconfirm>
             </div>
+            <div class="set-row" style="margin-top:12px">
+                <el-button @click="store.backupSave()">备份当前进度</el-button>
+                <el-popconfirm confirm-button-text="恢复备份" cancel-button-text="取消" title="恢复后会替换当前进度，同时备份替换前的进度。确定恢复吗？" @confirm="store.restoreBackup()">
+                    <template #reference><el-button :disabled="!saveStatus.backupAt">恢复上次备份</el-button></template>
+                </el-popconfirm>
+            </div>
+            <p class="backup-info">{{ saveStatus.backupAt ? `备份时间：${new Date(saveStatus.backupAt).toLocaleString()}。导入和重开前也会备份；保留最近一份。` : '尚无备份。重要突破后可以备份，重开前也会自动保留当前进度。' }}</p>
+            <p v-if="saveStatus.error" role="alert">{{ saveStatus.error }}</p>
             <el-input v-model="saveText" type="textarea" :rows="4" placeholder="存档内容会显示在这里, 也可粘贴存档后点击导入" style="margin-top:8px" />
-            <el-button v-if="saveText && !imported" size="small" style="margin-top:6px" @click="doImport">导入文本框中的存档</el-button>
+            <el-button v-if="saveText" size="small" style="margin-top:6px" @click="doImport">导入文本框中的存档</el-button>
         </div>
 
+        <div class="set-card" v-if="store.lastOfflineReport">
+            <div class="set-title">上次闭关收益</div>
+            <p>离开 {{ fmtTime(store.lastOfflineReport.elapsed) }}，恢复灵力 {{ fmt(store.lastOfflineReport.spirit) }}。已结算，回看不会再次领取。</p>
+        </div>
+        <el-button text @click="showDebug = !showDebug">{{ showDebug ? '收起快速体验工具' : '展开快速体验工具' }}</el-button>
         <!-- GM面板 -->
-        <div class="set-card">
+        <div class="set-card" v-if="showDebug">
             <div class="set-title">🛠️ GM面板 (来自「我的放置仙途」, 调试与快速体验用)</div>
             <el-switch v-model="store.isGM" active-text="GM模式" />
             <div class="gm-grid" v-if="store.isGM">
@@ -57,12 +70,15 @@
 
 <script setup>
     import { ref } from 'vue';
+    import { fmt, fmtTime } from '@/idle/utils';
+    const showDebug = ref(false);
     import { useIdleStore } from '@/idle/store';
+    import { saveStatus, readBackup } from '@/idle/save-storage';
+    readBackup();
     import { saveAs } from 'file-saver';
 
     const store = useIdleStore();
     const saveText = ref('');
-    const imported = ref(false);
 
     const doExport = () => {
         const data = store.exportSave();
@@ -73,7 +89,6 @@
 
     const doImport = () => {
         if (store.importSave(saveText.value)) {
-            imported.value = true;
             saveText.value = '';
         }
     };

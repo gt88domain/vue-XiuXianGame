@@ -3,7 +3,8 @@
 // 品质体系与命名库来自 vue-XiuXianGame(黄/玄/地/天/帝/神/仙 7阶 + 240个装备名)
 
 import { rint, rfloat, pick, chance, uid } from '../utils';
-import { combatFactor } from './realms';
+import { combatFactor, getRealm } from './realms';
+import { equipmentQualityCeiling } from '../progression';
 
 // ---------- 品质(vue-XiuXianGame) ----------
 export const QUALITIES = {
@@ -212,7 +213,8 @@ export const equipScore = stats => Math.floor(
 
 // 生成装备
 export const genEquipment = (level, opts = {}) => {
-    const quality = opts.quality || rollQuality(opts.luck || 1);
+    const rolled = opts.quality || rollQuality(opts.luck || 1);
+    const quality = QUALITY_ORDER[Math.min(QUALITY_ORDER.indexOf(rolled), equipmentQualityCeiling(level))];
     const qcfg = QUALITIES[quality];
     const slot = opts.slot || pick(Object.keys(SLOTS));
     const cf = combatFactor(level);
@@ -233,7 +235,7 @@ export const genEquipment = (level, opts = {}) => {
             stats[p.stat] = clampStat(p.stat, Math.round(base * qcfg.mult * 0.8 * 1000) / 1000);
         } else {
             // 数值属性随等级与境界倍率成长, 品质提供额外倍率
-            const growth = (0.5 + level * 0.35) * cf * qcfg.mult * 0.35;
+            const growth = (0.8 + getRealm(level).layer * 0.18) * cf * qcfg.mult * 0.35;
             stats[p.stat] = Math.max(1, Math.floor(base * growth));
         }
     }

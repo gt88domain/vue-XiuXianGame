@@ -1,0 +1,10 @@
+{
+  "date": "2026-10-15",
+  "source": "AI-generated for this game's prototype using OpenAI image generation; not claimed as hand-painted by a human artist",
+  "files": {
+    "cultivators.png": "Four original cultivation-stage costumes of the same adult sword cultivator; transparent sprite strip",
+    "spirits.png": "Four original forest wolf, mountain tiger, river serpent and stone guardian sprites; transparent strip",
+    "landscape.png": "Original panoramic mountain village, pine peaks and cloud temple background"
+  },
+  "usage": "Sprite strips are displayed using CSS cells; original generation files are preserved in the task workspace. No existing franchise characters were requested."
+}

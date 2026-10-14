@@ -1,10 +1,10 @@
 // ===== 秘境副本(roguelike 玩法与选项池来自 vue-idle-xiuxian dungeon.js + dungeonBuffs.js) =====
 
 export const DIFFICULTIES = {
-    1: { name: '简单', healthMod: 0.8, damageMod: 0.8, rewardMod: 0.8, minLevel: 1 },
-    2: { name: '普通', healthMod: 1.0, damageMod: 1.0, rewardMod: 1.0, minLevel: 10 },
-    3: { name: '困难', healthMod: 1.2, damageMod: 1.2, rewardMod: 1.5, minLevel: 28 },
-    4: { name: '炼狱', healthMod: 1.5, damageMod: 1.5, rewardMod: 2.0, minLevel: 55 }
+    1: { name: '初试', healthMod: 0.75, damageMod: 0.7, rewardMod: 0.8, minLevel: 3, floors: 5, entrySeconds: 45 },
+    2: { name: '普通', healthMod: 1.0, damageMod: 1.0, rewardMod: 1.0, minLevel: 10, floors: 7, entrySeconds: 90 },
+    3: { name: '困难', healthMod: 1.2, damageMod: 1.2, rewardMod: 1.5, minLevel: 28, floors: 9, entrySeconds: 150 },
+    4: { name: '炼狱', healthMod: 1.5, damageMod: 1.5, rewardMod: 2.0, minLevel: 55, floors: 10, entrySeconds: 240 }
 };
 
 export const MAX_FLOOR = 10;
