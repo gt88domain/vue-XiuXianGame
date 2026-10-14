@@ -84,6 +84,7 @@ export const runBattle = (player, monster, opts = {}) => {
     const p = { name: player.name, stats: player.stats, health: player.health, maxHealth: player.maxHealth, stunned: 0 };
     const m = { name: monster.name, stats: monster.stats, health: monster.stats.health, maxHealth: monster.stats.health, stunned: 0 };
     const logs = [];
+    const frames = [{ actor:null, playerHealth:p.health, monsterHealth:m.health, damage:0, round:0 }];
     const maxRounds = opts.maxRounds || 30;
     let round = 0;
 
@@ -111,7 +112,7 @@ export const runBattle = (player, monster, opts = {}) => {
             }
             const res = attackDamage(actor, target);
             logs.push(...res.logs);
-            if (res.dodged) continue;
+            if (res.dodged) { frames.push({actor:actor === p ? 'player' : 'monster',playerHealth:Math.max(0,p.health),monsterHealth:Math.max(0,m.health),damage:0,dodged:true,round}); continue; }
             target.health -= res.damage;
             if (res.isStun && target.health > 0) {
                 target.stunned = 1;
@@ -123,6 +124,7 @@ export const runBattle = (player, monster, opts = {}) => {
                 logs.push({ text: `${target.name} 触发 [反击]!`, type: 'buff' }, ...counter.logs);
                 if (!counter.dodged) actor.health -= counter.damage;
             }
+            frames.push({actor:actor === p ? 'player' : 'monster',playerHealth:Math.max(0,p.health),monsterHealth:Math.max(0,m.health),damage:res.damage,round});
             if (actor.health <= 0 || target.health <= 0) break;
         }
     }
@@ -132,5 +134,5 @@ export const runBattle = (player, monster, opts = {}) => {
         logs.push({ text: '回合数耗尽，双方罢手言和。', type: 'info' });
     }
     logs.push({ text: win ? `击败了【${m.name}】!` : (p.health <= 0 ? `不敌【${m.name}】，落败而逃...` : '战成平手'), type: win ? 'victory' : 'defeat' });
-    return { win, rounds: round, logs, playerHealth: Math.max(0, p.health) };
+    return { win, rounds: round, logs, frames, playerHealth: Math.max(0, p.health), monsterHealth:Math.max(0,m.health) };
 };

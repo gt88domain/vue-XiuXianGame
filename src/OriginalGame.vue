@@ -10,7 +10,8 @@
         <div v-if="saveStatus.error" class="save-warning" role="alert">{{ saveStatus.error }} <el-button @click="exportEmergency">导出当前存档</el-button></div>
         <IdleGame v-if="playReady" />
         <section v-else class="session-wait ink-panel">
-            <h2>{{ duplicate ? '这份存档正在另一个页面运行' : '正在打开修行进度…' }}</h2>
+            <h2>{{ unsupported ? '当前浏览器不支持安全存档锁' : duplicate ? '这份存档正在另一个页面运行' : '正在打开修行进度…' }}</h2>
+            <p v-if="unsupported">请使用新版 Chrome、Edge、Firefox 或 Safari 打开游戏，以保护进度。</p>
             <p v-if="duplicate">请关闭另一个游戏页面，再回到这里继续，避免两个页面覆盖进度。</p>
             <el-button v-if="duplicate" type="primary" @click="acquireSession">继续修行</el-button>
         </section>
@@ -25,11 +26,12 @@
     import { saveAs } from 'file-saver';
     const playReady = ref(false);
     const duplicate = ref(false);
+    const unsupported = ref(false);
     let releaseSession;
     async function acquireSession() {
         if (playReady.value) return;
         duplicate.value = false;
-        if (!navigator.locks) { playReady.value = true; return; }
+        if (!navigator.locks) { unsupported.value = true; return; }
         try {
             await navigator.locks.request('xiuxian-original-save-owner', { ifAvailable: true }, async lock => {
                 if (!lock) { duplicate.value = true; return; }

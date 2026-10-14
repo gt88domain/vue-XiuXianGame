@@ -12,11 +12,12 @@
             <!-- 铭牌头部 -->
             <NameplateHeader @rename="renameVisible = true" @breakthrough="store.breakthrough()" />
 
-            <JourneyGuide @navigate="activeTab = $event" />
+            <WorldScene @navigate="navigateTo" />
+            <JourneyGuide @navigate="navigateTo" />
 
             <!-- 主体: 左侧功能 / 右侧日志 -->
             <div class="idle-body">
-                <div class="idle-tabs ink-panel">
+                <div ref="tabsElement" class="idle-tabs ink-panel">
                     <el-tabs v-model="activeTab">
                         <el-tab-pane label="修炼" name="cultivate"><TabCultivate /></el-tab-pane>
                         <el-tab-pane label="探索" name="explore"><TabExplore /></el-tab-pane>
@@ -58,7 +59,9 @@
             <el-dialog :model-value="!!store.offlineReport" title="闭关归来" width="360px" @close="store.offlineReport = null">
                 <p>你闭关了 <b style="color:#f0d890">{{ fmtTime(store.offlineReport?.elapsed || 0) }}</b></p>
                 <p>恢复灵力: <b style="color:#7cb8ff">{{ fmt(store.offlineReport?.spirit || 0) }}</b> (离线效率60%)</p>
+                <div class="offline-next"><b>下一步 · {{ nextGoal.title }}</b><p>{{ nextGoal.description }}</p></div>
                 <template #footer>
+                    <el-button @click="store.offlineReport = null; navigateTo(nextGoal.tab)">{{ nextGoal.action }}</el-button>
                     <el-button type="primary" @click="store.offlineReport = null">继续修行</el-button>
                 </template>
             </el-dialog>
@@ -67,10 +70,12 @@
 </template>
 
 <script setup>
-    import { ref, watch, onMounted, onUnmounted } from 'vue';
+    import { computed, ref, watch, nextTick, onMounted, onUnmounted } from 'vue';
     import '@/idle/theme.css';
     import { useIdleStore } from '@/idle/store';
     import { fmt, fmtTime } from '@/idle/utils';
+    import { nextJourneyGoal } from '@/idle/journey';
+    import WorldScene from './components/WorldScene.vue';
     import JourneyGuide from './components/JourneyGuide.vue';
     import SpiritMotes from './components/SpiritMotes.vue';
     import NameplateHeader from './components/NameplateHeader.vue';
@@ -86,7 +91,10 @@
     import TabSettings from './components/TabSettings.vue';
 
     const store = useIdleStore();
+    const nextGoal = computed(() => nextJourneyGoal(store));
     const activeTab = ref('cultivate');
+    const tabsElement = ref(null);
+    const navigateTo = tab => { activeTab.value = tab; nextTick(() => tabsElement.value?.scrollIntoView({behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',block:'start'})); };
     const renameVisible = ref(false);
     const newName = ref('');
     const flash = ref(null);
@@ -132,6 +140,8 @@
 </script>
 
 <style scoped>
+    .offline-next { margin-top:18px;padding:12px;background:#c1a36d12;border-left:2px solid #b29a61;line-height:1.7;font-size:13px }
+    .offline-next p { margin-bottom:0;font-size:12px }
     .idle-page {
         min-height: 100vh;
         padding: 18px 0 34px;

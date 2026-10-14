@@ -20,11 +20,15 @@
             <el-button :type="store.player.settings.autoCultivate ? 'warning' : 'info'" @click="store.player.settings.autoCultivate = !store.player.settings.autoCultivate">
                 自动修炼 {{ store.player.settings.autoCultivate ? '开' : '关' }}
             </el-button>
-            <el-button class="btn-breakthrough" type="danger" :disabled="!store.canBreakthrough" @click="store.breakthrough()">
+            <el-button class="btn-breakthrough" type="danger" :disabled="!store.canBreakthrough || store.breakthroughBlockers.length > 0" @click="store.breakthrough()">
                 {{ store.isMaxLevel ? '已至圆满' : '突破境界' }}
             </el-button>
         </div>
 
+        <section v-if="store.majorGoals.length" class="major-goals">
+            <b>跨越大境界 · 历练准备</b><p>修为圆满后，完成以下历练才能突破；小境界不需要这些条件。</p><div v-for="goal in store.majorGoals" :key="goal.label" :class="{done:goal.done}">{{ goal.done ? '✓' : '○' }} {{ goal.label }}</div>
+        </section>
+        <p class="pace-note">当前这一重基础修炼约 {{ Math.round(store.trainingSeconds / 60) }} 分钟，顿悟、装备与丹药可缩短时间。突破不再返还灵力。历练修为每重最多补足25%，其余需要修炼。</p>
         <!-- 单次修炼说明 -->
         <div class="info-line">单次修炼: 灵力 -{{ fmt(store.cultivateCost) }} → 修为 +{{ fmt(store.cultivateGain) }} (幸运触发双倍, 当前幸运 {{ store.luck.toFixed(2) }})</div>
 
@@ -118,6 +122,7 @@
 <style scoped>
     .cultivate { padding: 4px 2px; }
 
+    .major-goals{padding:12px;margin:12px 0;border:1px solid #b5964350;border-radius:6px;font-size:13px;line-height:1.9}.major-goals p,.pace-note{font-size:12px;color:var(--el-text-color-secondary);line-height:1.8}.major-goals .done{color:#a4c88d}
     .progress-box { text-align: center; }
 
     .realm-name {

@@ -11,6 +11,7 @@
         "dev:original": "vite --config vite.original.config.js",
         "build:original": "vite build --config vite.original.config.js && node scripts/package-original.mjs",
         "preview:original": "vite preview --config vite.original.config.js",
+        "test:progression": "node --experimental-loader ./scripts/ext-loader.mjs ./scripts/progression-play.mjs",
         "test:idle": "node --experimental-loader ./scripts/ext-loader.mjs ./scripts/sim-test.mjs",
         "test:original": "node --experimental-loader ./scripts/ext-loader.mjs --test ./scripts/original-regression.test.mjs"
     },

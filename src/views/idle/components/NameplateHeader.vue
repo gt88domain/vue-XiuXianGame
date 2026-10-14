@@ -25,7 +25,7 @@
                 <span class="pchip">◈ 灵石 <b>{{ fmt(store.player.spiritStones) }}</b></span>
                 <span class="pchip">炼器石 <b>{{ fmt(store.player.reinforceStones) }}</b></span>
                 <span class="pchip" v-if="store.player.petEssence > 0">精华 <b>{{ fmt(store.player.petEssence) }}</b></span>
-                <span class="pchip hot" role="button" tabindex="0" @keydown.enter="$emit('breakthrough')" @keydown.space.prevent="$emit('breakthrough')" v-if="store.canBreakthrough" @click="$emit('breakthrough')">● 可突破</span>
+                <span class="pchip hot" role="button" tabindex="0" @keydown.enter="$emit('breakthrough')" @keydown.space.prevent="$emit('breakthrough')" v-if="store.canBreakthrough" @click="$emit('breakthrough')">{{ store.breakthroughBlockers.length ? '○ 待完成历练' : '● 可突破' }}</span>
             </div>
         </div>
 

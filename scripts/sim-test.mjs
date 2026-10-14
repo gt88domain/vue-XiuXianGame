@@ -59,8 +59,11 @@ store.gacha('pet', 10);
 assert(store.gachaResults.results.length === 10, '抽奖十连');
 assert(store.player.counters.gachaCount === 20, '抽奖计数');
 
-// 7. 秘境
+// 7. 秘境（夹具满足入门等级和灵力）
+store.player.level = 3;
+store.player.spirit = store.spiritCap;
 store.dungeonStart(1);
+assert(Boolean(store.dungeon), "初试秘境可进入");
 let guard = 0;
 while (store.dungeon && !store.dungeon.finished && guard++ < 20) {
     if (store.dungeon.phase === 'choose') {
@@ -89,13 +92,11 @@ store.fightBoss();
 assert(store.player.nextBossTime > 0, 'BOSS进入冷却');
 
 // 10. 各阶段战斗胜率与修炼节奏模拟
-console.log('\n===== 数值节奏模拟 =====');
+console.log('\n===== 属性夹具采样（不是自然通关或胜率验收）=====');
 for (const targetLv of [1, 30, 60, 90, 120, 150, 188]) {
-    // 快速升到目标等级
-    while (store.player.level < Math.min(targetLv, MAX_LEVEL)) {
-        store.player.cultivation = maxCultivationOf(store.player.level);
-        store.breakthrough();
-    }
+    // 属性夹具采样，不代表自然升级已通关。避免跳过新历练门槛的死循环。
+    store.player.level = Math.min(targetLv, MAX_LEVEL);
+    store.player.cultivation = 0;
     const regen = store.spiritRegen;
     const cost = store.cultivateCost;
     const gain = store.cultivateGain;

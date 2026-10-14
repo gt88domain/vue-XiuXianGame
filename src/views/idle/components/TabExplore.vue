@@ -37,9 +37,10 @@
 
         <!-- 地点列表 -->
         <div class="loc-list">
-            <button type="button" v-for="loc in locations" :key="loc.id" class="loc-card" :disabled="store.player.level < loc.minLevel" :aria-pressed="store.player.settings.exploreLocation === loc.id"
+            <button type="button" v-for="(loc, i) in locations" :key="loc.id" class="loc-card" :disabled="store.player.level < loc.minLevel" :aria-pressed="store.player.settings.exploreLocation === loc.id"
                 :class="{ locked: store.player.level < loc.minLevel, active: store.player.settings.exploreLocation === loc.id }"
                 @click="choose(loc)">
+                <div class="loc-art" :style="{backgroundImage:`url(${landscape})`,backgroundPosition:`${Math.min(i,2)*50}% center`}" aria-hidden="true" />
                 <div class="loc-name">
                     {{ loc.name }}
                     <el-tag v-if="store.player.level < loc.minLevel" size="small" type="info">需 {{ realmName(loc.minLevel) }}</el-tag>
@@ -70,6 +71,7 @@
 </template>
 
 <script setup>
+    import landscape from '@/assets/xiuxian/landscape.png';
     import { computed, ref } from 'vue';
     import { useIdleStore } from '@/idle/store';
     import { fmt } from '@/idle/utils';
@@ -155,6 +157,7 @@
         transition: all 0.2s;
     }
 
+    .loc-art{height:78px;margin:-10px -10px 9px;border-radius:5px 5px 0 0;background-size:300% auto;opacity:.85}
     .loc-card:hover { border-color: var(--el-color-primary); }
 
     .loc-card.active { border-color: var(--el-color-success); background: var(--el-color-success-light-9); }

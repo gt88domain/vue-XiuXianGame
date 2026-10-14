@@ -21,7 +21,7 @@
             </div>
             <div class="res-line">
                 炼器石: <b>{{ fmt(store.player.reinforceStones) }}</b> · 洗练石: <b>{{ fmt(store.player.refinementStones) }}</b>
-                (分解装备获得)
+                (分解装备获得) · 当前境界强化上限 +{{ store.enhancementLimit }}
             </div>
         </div>
 
